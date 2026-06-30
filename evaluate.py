@@ -1,9 +1,10 @@
 """Leave-one-subject-out scoring for the model in module.py.
 
-Prints `metric: <value>` for Weco to maximize: the mean per-subject REM F1 (F1 on
-each held-out subject, averaged across folds). Run directly for the full breakdown.
+Prints `metric: <value>` for Weco to maximize: the mean per-subject REM F-beta
+(beta=0.3, which weights precision over recall), computed per held-out subject and
+averaged across folds. Run directly for the full breakdown.
 
-Scoring follows the paper's Figure 1. Accuracy, precision, recall, and F1 are
+Scoring follows the paper's Figure 1. Accuracy, precision, recall, and F-beta are
 computed per held-out subject and averaged across folds (mean ± SEM); a subject
 with no scored REM is skipped, since REM precision and recall are undefined there.
 The confusion matrix is pooled over all epochs and row-normalized (the paper
@@ -26,13 +27,14 @@ import json
 import os
 
 import numpy as np
-from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
+from sklearn.metrics import (accuracy_score, confusion_matrix, fbeta_score,
                              precision_score, recall_score)
 
 import splits
 from module import build_model
 
 REM_LABEL = 1
+BETA = 0.3                           # F-beta < 1 weights precision over recall
 _CUT_FRACTIONS = (0.25, 0.5, 0.75)   # points in the night where look-ahead is checked
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
 _LABELS = ["Wake/NREM", "REM"]
@@ -78,7 +80,7 @@ def main() -> float:
     # subjects (groups): (n_epochs,)   -- from the committed matrix when present
     X, y, groups = splits.load_dataset()
 
-    per_fold = {"accuracy": [], "precision": [], "recall": [], "f1": []}
+    per_fold = {"accuracy": [], "precision": [], "recall": [], "fbeta": []}
     pooled_true, pooled_pred = [], []   # every epoch, for the pooled confusion (A)
     skipped = 0                         # subjects with no scored REM
     for train_idx, test_idx in splits.cross_validator().split(X, y, groups=groups):
@@ -105,24 +107,24 @@ def main() -> float:
             precision_score(y_test, y_pred, pos_label=REM_LABEL, zero_division=0))
         per_fold["recall"].append(
             recall_score(y_test, y_pred, pos_label=REM_LABEL, zero_division=0))
-        per_fold["f1"].append(
-            f1_score(y_test, y_pred, pos_label=REM_LABEL, zero_division=0))
+        per_fold["fbeta"].append(
+            fbeta_score(y_test, y_pred, beta=BETA, pos_label=REM_LABEL, zero_division=0))
 
     stats = {name: _mean_sem(vals) for name, vals in per_fold.items()}
     confusion = _row_normalized_confusion(          # pooled over all epochs (paper's A)
         np.concatenate(pooled_true), np.concatenate(pooled_pred))
-    n_subjects = len(per_fold["f1"])
+    n_subjects = len(per_fold["fbeta"])
 
-    f1_mean = stats["f1"][0]
-    print(f"metric: {f1_mean:.4f}")
-    for name in ("f1", "accuracy", "precision", "recall"):
+    fbeta_mean = stats["fbeta"][0]
+    print(f"metric: {fbeta_mean:.4f}")
+    for name in ("fbeta", "accuracy", "precision", "recall"):
         mean, sem = stats[name]
         print(f"{name}: {mean:.4f} +/- {sem:.4f} SEM")
     note = f" ({skipped} skipped: no scored REM)" if skipped else ""
-    print(f"(per-subject mean over {n_subjects} folds{note})")
+    print(f"(per-subject mean over {n_subjects} folds{note}; beta={BETA})")
 
     _save_results(stats, confusion, n_subjects)
-    return f1_mean
+    return fbeta_mean
 
 
 def _row_normalized_confusion(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
@@ -149,7 +151,8 @@ def _save_results(stats: dict, confusion: np.ndarray, n_subjects: int) -> None:
     with open(base + ".json", "w") as f:
         json.dump({
             "model_hash": model_hash,
-            "metric_mean_rem_f1": stats["f1"][0],
+            "metric_mean_rem_fbeta": stats["fbeta"][0],
+            "beta": BETA,
             "n_subjects": n_subjects,
             "per_subject": {k: {"mean": m, "sem": s} for k, (m, s) in stats.items()},
             "confusion_rownorm": confusion.tolist(),
@@ -185,7 +188,7 @@ def _save_figure(path: str, stats: dict, confusion: np.ndarray, model_hash: str)
     ax_bar.set_ylabel("Ratio")
     ax_bar.set_title("Per-fold mean +/- SEM")
 
-    fig.suptitle(f"REM detection — model {model_hash}  (REM F1 = {stats['f1'][0]:.3f})")
+    fig.suptitle(f"REM detection - model {model_hash}  (REM F{BETA} = {stats['fbeta'][0]:.3f})")
     fig.tight_layout()
     fig.savefig(path, dpi=120, bbox_inches="tight")
     plt.close(fig)
