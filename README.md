@@ -1,12 +1,14 @@
-# Real-time sleep staging
+# Real-time wearable REM detection
 
-A harness for optimizing a real-time REM detector with [Weco](https://www.weco.ai/),
-using the Walch et al. (2019) Apple Watch dataset (heart rate, motion, and
-time-of-night, to REM vs. not-REM), following Mallela & Mallett (2024).
+Detect REM sleep in real time from a wearable — heart rate, motion, and
+time-of-night — and optimize the detector with [Weco](https://www.weco.ai/). The
+data is the Walch et al. (2019) Apple Watch dataset (REM vs. not-REM), following
+Mallela & Mallett (2024).
 
-Weco rewrites `module.py` to raise the REM F1 under leave-one-subject-out
-cross-validation. Each candidate model has to stay causal, so it can run live on
-the watch rather than reading the whole night after the fact.
+Weco rewrites `module.py` to raise a precision-weighted REM score (F-beta with
+beta=0.3, which favors precision over recall to cut false REM cues) under
+leave-one-subject-out cross-validation. Each candidate stays causal, so it can run
+live on the watch rather than reading the whole night after the fact.
 
 ## Layout
 
@@ -20,11 +22,11 @@ the watch rather than reading the whole night after the fact.
 | `data/`       | recordings and the committed feature matrix (see `data/README.md`) | no |
 | `results/`    | per-model confusion matrix and metrics | no |
 
-`module.py` must provide `build_model()`, returning a scikit-learn estimator with
-`fit(X, y)` and `predict(X)` (1 for REM). The features are in `features.py` and
-Weco does not change them; it optimizes only the model. `evaluate.py` checks each
-fold for look-ahead and scores 0 if a model's earlier predictions change when
-later epochs are removed.
+`module.py` must provide `build_model()`, returning an estimator with `fit(X, y)`
+and `predict(X)` (1 for REM) that applies the REM threshold in `predict`. The
+features are in `features.py` and Weco does not change them; it optimizes only the
+model. `evaluate.py` checks each fold for look-ahead and scores 0 if a model's
+earlier predictions change when later epochs are removed.
 
 ### Design
 
@@ -62,7 +64,7 @@ rebuild.
 uv run python evaluate.py
 ```
 
-Prints the metric and the per-subject accuracy, precision, recall, and F1, and
+Prints the metric and the per-subject accuracy, precision, recall, and F-beta, and
 writes `results/<model-hash>.{py,json,png}`.
 
 ## Run Weco
