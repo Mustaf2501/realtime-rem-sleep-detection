@@ -29,17 +29,34 @@ the REM threshold, class weighting, calibration.
 """
 from __future__ import annotations
 
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import FixedThresholdClassifier
 
 REM_THRESHOLD = 0.24      # P(REM) >= threshold -> REM  (paper used 0.24)
 RF_KWARGS = dict(n_estimators=200, min_samples_leaf=48, n_jobs=-1, random_state=0)
 
 
+class RemModel:
+    """Predicts REM by thresholding its own probabilities. Apply the threshold
+    here, in predict — do NOT wrap a model in sklearn's FixedThresholdClassifier:
+    that breaks on custom or groups-aware estimators. Keep this shape (fit /
+    predict / predict_proba, classes_ set, fit accepts groups) for any model,
+    including LSTMs and other custom estimators, and they compose cleanly."""
+
+    def __init__(self, threshold: float = REM_THRESHOLD):
+        self.threshold = threshold
+
+    def fit(self, X, y, groups=None):     # groups is optional; ignore it if unused
+        self.classes_ = np.array([0, 1])
+        self.model_ = RandomForestClassifier(**RF_KWARGS).fit(X, y)
+        return self
+
+    def predict_proba(self, X):
+        return self.model_.predict_proba(X)
+
+    def predict(self, X):
+        return (self.model_.predict_proba(X)[:, 1] >= self.threshold).astype(int)
+
+
 def build_model():
-    """The classifier the harness cross-validates: a random forest whose
-    .predict() applies the REM probability threshold (via FixedThresholdClassifier)
-    instead of the default 0.5."""
-    forest = RandomForestClassifier(**RF_KWARGS)
-    return FixedThresholdClassifier(
-        forest, threshold=REM_THRESHOLD, pos_label=1, response_method="predict_proba")
+    return RemModel()
