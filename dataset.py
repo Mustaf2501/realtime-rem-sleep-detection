@@ -31,9 +31,13 @@ EPOCH_SEC = 30.0
 _STAGE_MAP = {0: WAKE, 1: N1, 2: N2, 3: N3, 4: N3, 5: REM}  # missing -> -1 (unscored)
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+# The Walch (2019) raw recordings live in their own subfolder so other datasets can
+# sit alongside them (e.g. data/bidsleep). The committed feature matrix stays in
+# DATA_DIR; only the raw recordings and their parse cache are under WALCH_DIR.
+WALCH_DIR = os.path.join(DATA_DIR, "walch2019")
 # Raw text is parsed once and cached here as .npz; the raw files never change, so
 # later loads are near-instant. This keeps every Weco evaluation fast.
-CACHE_DIR = os.path.join(DATA_DIR, ".cache")
+CACHE_DIR = os.path.join(WALCH_DIR, ".cache")
 
 
 @dataclass
@@ -64,12 +68,12 @@ class Record:
 
 def load_records() -> list[Record]:
     """Every subject-night in ./data, keyed by the <id>_labeled_sleep.txt files."""
-    paths = glob.glob(os.path.join(DATA_DIR, "*_labeled_sleep.txt"))
+    paths = glob.glob(os.path.join(WALCH_DIR, "*_labeled_sleep.txt"))
     print(paths)
     ids = sorted(os.path.basename(p).replace("_labeled_sleep.txt", "") for p in paths)
     if not ids:
         raise FileNotFoundError(
-            f"No recordings in {DATA_DIR}. See data/README.md to install the dataset.")
+            f"No recordings in {WALCH_DIR}. See data/README.md to install the dataset.")
     return [_load_one(sid) for sid in ids]
 
 
@@ -101,7 +105,7 @@ def _load_one(subject_id: str) -> Record:
 
 def _read(subject_id: str, suffix: str, sep: str) -> np.ndarray:
     """Parse one raw text file into a 2-D float array."""
-    path = os.path.join(DATA_DIR, f"{subject_id}_{suffix}.txt")
+    path = os.path.join(WALCH_DIR, f"{subject_id}_{suffix}.txt")
     return pd.read_csv(path, header=None, sep=sep, engine="c").to_numpy(float)
 
 

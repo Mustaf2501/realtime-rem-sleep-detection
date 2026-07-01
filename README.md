@@ -14,13 +14,13 @@ live on the watch rather than reading the whole night after the fact.
 
 | File | Role | Weco edits? |
 |------|------|-------------|
-| `module.py`   | the model: classifier plus REM threshold | yes |
-| `features.py` | feature extraction (HR, activity, time + causal temporal features) | no |
+| `module.py`   | the model: XGBoost with a motor-atonia prior + tuned REM threshold | yes |
+| `features.py` | feature extraction (HR + HR variability, activity + motion variability, time) | no |
 | `splits.py`   | builds the feature matrix and the LOSO splitter | no |
 | `evaluate.py` | scores via LOSO, prints `metric: N` | no |
 | `results.py`  | writes per-model metrics, confusion, and figure to `results/` | no |
-| `dataset.py`  | loads the Walch recordings (parsed once, cached) | no |
-| `data/`       | recordings and the committed feature matrix (see `data/README.md`) | no |
+| `dataset.py`  | loads the Walch recordings from `data/walch2019/` (parsed once, cached) | no |
+| `data/`       | committed feature matrix; raw Walch recordings in `data/walch2019/` (see `data/README.md`) | no |
 | `results/`    | per-model confusion matrix and metrics | no |
 
 `module.py` must provide `build_model()`, returning an estimator with `fit(X, y)`

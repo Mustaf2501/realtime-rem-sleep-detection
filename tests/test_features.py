@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dataset import EPOCH_SEC, Record, load_records
-from features import (ACT_EMA_ALPHA, HR_EMA_ALPHA, _activity_counts, _causal_fill,
+from features import (ACT_EMA_ALPHA, _activity_counts, _causal_fill,
                       _ema, _epoch_hr_mean, featurize)
 
 NAN = np.nan
@@ -86,9 +86,10 @@ def test_real_data_shape_and_finite():
 # time-of-night feature (column 2)
 # --------------------------------------------------------------------------- #
 def test_time_of_night_is_epoch_time_in_hours():
+    from features import FEATURE_NAMES
     r = make_record(n_epochs=20)
     X = featurize(r)
-    assert np.allclose(X[:, 2], r.epoch_time / 3600.0)
+    assert np.allclose(X[:, FEATURE_NAMES.index("time_h")], r.epoch_time / 3600.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -119,9 +120,10 @@ def test_ema_matches_hand_computation():
 
 
 def test_constant_hr_gives_constant_hr_feature():
-    # HR steady at 60 bpm -> EMA stays 60 -> feature = 60**3 / 1000 = 216
+    # HR steady at 60 bpm -> hr_mean is just the raw per-epoch mean = 60
+    from features import FEATURE_NAMES
     X = featurize(make_record(n_epochs=20, hr_bpm=60.0))
-    assert np.allclose(X[:, 0], 60.0 ** 3 / 1000.0)
+    assert np.allclose(X[:, FEATURE_NAMES.index("hr_mean")], 60.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -143,9 +145,11 @@ def test_activity_count_localizes_to_its_epoch_block():
 
 def test_featurize_activity_column_is_smoothed_squared_counts():
     # paper: the summed count magnitude is squared, then EMA-smoothed
+    from features import FEATURE_NAMES
     r = make_record(n_epochs=20, burst_epoch=6)
     X = featurize(r)
-    assert np.allclose(X[:, 1], _ema(_activity_counts(r) ** 2, ACT_EMA_ALPHA))
+    assert np.allclose(X[:, FEATURE_NAMES.index("activity")],
+                       _ema(_activity_counts(r) ** 2, ACT_EMA_ALPHA))
 
 
 # --------------------------------------------------------------------------- #

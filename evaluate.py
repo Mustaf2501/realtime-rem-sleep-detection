@@ -5,25 +5,22 @@ Prints `metric: <value>` for Weco to maximize: the mean per-subject REM F-beta
 averaged across folds. Run directly for the full breakdown.
 
 Scoring follows the paper's Figure 1. Accuracy, precision, recall, and F-beta are
-computed per held-out subject and averaged across folds (mean ± SEM); a subject
+computed per held-out subject and averaged across folds (mean +/- SEM); a subject
 with no scored REM is skipped, since REM precision and recall are undefined there.
 The confusion matrix is pooled over all epochs and row-normalized (the paper
 row-normalizes the matrix but averages the metrics across folds), so its
 [REM, REM] cell is close to, but not exactly, the averaged recall.
 
-Each run writes results/<model-hash>.{py,json,png}, keyed by a hash of module.py:
-the .py is the exact model, the .json the numbers, the .png the figure. Weco logs
-the metric and the code itself; these are extra.
-
 Before scoring, each fold is checked for look-ahead (the real-time constraint in
 module.py): if the first-k predictions change when later epochs are removed or
 altered, the model is reading the future and scores 0.
+
+Results (the exact model, the numbers, the figure) are written to results/ by
+results.py; this module only scores.
 """
 from __future__ import annotations
 
 import inspect
-import os
-import signal
 
 import numpy as np
 from sklearn.metrics import (accuracy_score, classification_report, fbeta_score,
@@ -31,27 +28,13 @@ from sklearn.metrics import (accuracy_score, classification_report, fbeta_score,
 
 import results
 import splits
-from dataset import N1, N2, N3, REM, WAKE
 from module import build_model
 
-STAGES = [WAKE, N1, N2, N3, REM]     # canonical class order for the confusion / report
-REM_LABEL = REM                      # the one class the metric is about (multiclass now)
+STAGES = [0, 1]                      # not-REM, REM (binary)
+REM_LABEL = 1                        # the class the metric is about
 BETA = 0.3                           # F-beta < 1 weights precision over recall
 _CUT_FRACTIONS = (0.25, 0.5, 0.75)   # points in the night where look-ahead is checked
-_LABELS = ["Wake", "N1", "N2", "N3", "REM"]
-EVAL_TIMEOUT_S = 600                 # a candidate that takes longer scores 0 (keeps the search moving)
-
-
-def _start_watchdog() -> None:
-    """Score 0 and exit if the eval runs too long, so a slow/hung candidate never
-    stalls the search. (Best-effort: fires between Python operations; a pure
-    C-level hang may not be interruptible.)"""
-    def _on_timeout(signum, frame):
-        print("metric: 0.0")
-        print(f"EVAL TIMEOUT: exceeded {EVAL_TIMEOUT_S}s; candidate too slow.")
-        os._exit(0)
-    signal.signal(signal.SIGALRM, _on_timeout)
-    signal.alarm(EVAL_TIMEOUT_S)
+_LABELS = ["not-REM", "REM"]
 
 
 def _fit(model, X: np.ndarray, y: np.ndarray, groups: np.ndarray):
@@ -90,8 +73,7 @@ def _mean_sem(values: list[float]) -> tuple[float, float]:
 
 
 def main() -> float:
-    _start_watchdog()                # cap eval wall-clock so no candidate stalls the run
-    # features (X): (n_epochs, n_features) | labels (y): (n_epochs,), stage 0..4 (4 == REM)
+    # features (X): (n_epochs, n_features) | labels (y): (n_epochs,), 1 == REM
     # subjects (groups): (n_epochs,)   -- from the committed matrix when present
     X, y, groups = splits.load_dataset()
 
@@ -107,7 +89,7 @@ def main() -> float:
             print("metric: 0.0")
             print(f"CAUSALITY CHECK FAILED on subject group {int(groups[test_idx][0])}: "
                   "predictions for earlier epochs change when later epochs are removed "
-                  "or altered — the model looks ahead and is not real-time.")
+                  "or altered -- the model looks ahead and is not real-time.")
             return 0.0
 
         pooled_true.append(y_test)             # the pooled confusion uses every subject
@@ -117,8 +99,7 @@ def main() -> float:
             skipped += 1
             continue
 
-        # REM is one class among five; score it one-vs-rest via labels=[REM].
-        per_fold["accuracy"].append(accuracy_score(y_test, y_pred))   # overall, all 5 stages
+        per_fold["accuracy"].append(accuracy_score(y_test, y_pred))
         per_fold["precision"].append(precision_score(
             y_test, y_pred, labels=[REM_LABEL], average="macro", zero_division=0))
         per_fold["recall"].append(recall_score(
@@ -129,9 +110,9 @@ def main() -> float:
     pooled_true_all = np.concatenate(pooled_true)   # every epoch, every subject
     pooled_pred_all = np.concatenate(pooled_pred)
     stats = {name: _mean_sem(vals) for name, vals in per_fold.items()}
-    confusion = results.row_normalized_confusion(     # 5x5, pooled over all epochs
+    confusion = results.row_normalized_confusion(     # pooled over all epochs (paper's A)
         pooled_true_all, pooled_pred_all, STAGES)
-    per_class = classification_report(                # overall, per-stage (pooled)
+    per_class = classification_report(                # per-class, pooled
         pooled_true_all, pooled_pred_all, labels=STAGES, target_names=_LABELS,
         output_dict=True, zero_division=0)
     n_subjects = len(per_fold["fbeta"])
@@ -147,9 +128,9 @@ def main() -> float:
     print(f"overall accuracy: {acc_mean:.4f} +/- {acc_sem:.4f} SEM  "
           f"(per-subject mean over {n_subjects} folds{note}; beta={BETA})")
     print("per class, pooled over all epochs:")
-    for lbl in _LABELS:                              # so the other stages are visible too
+    for lbl in _LABELS:
         r = per_class[lbl]
-        print(f"  {lbl:5s} precision {r['precision']:.3f}  recall {r['recall']:.3f}  "
+        print(f"  {lbl:8s} precision {r['precision']:.3f}  recall {r['recall']:.3f}  "
               f"f1 {r['f1-score']:.3f}  (n={int(r['support'])})")
 
     results.save(stats, confusion, per_class, n_subjects, _LABELS, BETA)
