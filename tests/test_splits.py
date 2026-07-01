@@ -49,7 +49,7 @@ def test_make_dataset_stacks_labels_and_groups():
                make_record("s1", [N2, REM, WAKE])]
     X, y, groups = splits.make_dataset(records)
 
-    assert X.shape == (6, 3)                                   # 6 scored epochs, 3 features
+    assert X.shape == (6, len(features.FEATURE_NAMES))         # 6 scored epochs, one col per feature
     assert np.array_equal(y, [0, 1, 1, 0, 1, 0])              # 1 exactly on REM
     assert np.array_equal(groups, [0, 0, 0, 1, 1, 1])        # subject index per row
 

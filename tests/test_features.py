@@ -62,9 +62,10 @@ def truncate(r: Record, k: int) -> Record:
 # shape / sanity
 # --------------------------------------------------------------------------- #
 def test_featurize_shape_one_row_per_epoch():
+    from features import FEATURE_NAMES
     r = make_record(n_epochs=20)
     X = featurize(r)
-    assert X.shape == (20, 3)            # one row per epoch, three features
+    assert X.shape == (20, len(FEATURE_NAMES))   # one row per epoch, one col per named feature
 
 
 def test_featurize_has_no_nans():
@@ -74,9 +75,10 @@ def test_featurize_has_no_nans():
 
 def test_real_data_shape_and_finite():
     """Sanity check on a real subject-night from the dataset."""
+    from features import FEATURE_NAMES
     r = load_records()[0]
     X = featurize(r)
-    assert X.shape == (r.epoch_time.size, 3)
+    assert X.shape == (r.epoch_time.size, len(FEATURE_NAMES))
     assert np.isfinite(X).all()
 
 
@@ -203,3 +205,25 @@ def test_features_are_causal():
     r = make_record(n_epochs=20, burst_epoch=6)
     k = 15
     assert np.allclose(featurize(r)[:k], featurize(truncate(r, k))[:k])
+
+
+# Truncation invariance is the operational definition of "no look-ahead": removing
+# every epoch after k must not change any of the first k feature rows, in ANY
+# column. This is a black-box check on the whole pipeline (base features, the
+# agcounts activity filter, and the temporal features), so it catches leakage the
+# per-column reasoning might miss. Bit-exact: a causal pipeline changes nothing.
+@pytest.mark.parametrize("k", [30, 100, 300, 600, 900])
+def test_featurize_never_changes_the_past_on_real_data(k):
+    r = load_records()[0]
+    if k >= r.epoch_time.size:
+        pytest.skip("cut beyond this night")
+    assert np.array_equal(featurize(r)[:k], featurize(truncate(r, k))[:k])
+
+
+@pytest.mark.parametrize("k", [7, 9, 12, 16])
+def test_activity_filter_does_not_leak_across_the_cut(k):
+    # Put the movement burst in the epoch just before the cut, so any look-ahead in
+    # the agcounts band-pass filter (future accel samples bleeding backward over the
+    # epoch boundary) would show up as a changed count in an epoch we keep.
+    r = make_record(n_epochs=20, burst_epoch=k - 1)
+    assert np.array_equal(featurize(r)[:k], featurize(truncate(r, k))[:k])

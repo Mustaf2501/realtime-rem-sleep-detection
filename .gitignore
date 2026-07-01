@@ -22,3 +22,6 @@ venv/
 .DS_Store
 .agents/
 skills-lock.json
+
+# Scratch text files (notes, dumps, etc.) — not part of the project
+*.txt
