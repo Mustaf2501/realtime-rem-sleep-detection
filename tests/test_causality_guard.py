@@ -1,4 +1,4 @@
-"""Tests for the causality guard in evaluate.py.
+"""Tests for the causality guard in causality.py.
 
 `_predictions_are_causal` should pass a model that scores each epoch from its own
 row and fail one that reads a later epoch to decide the current one.
@@ -7,7 +7,7 @@ row and fail one that reads a later epoch to decide the current one.
 """
 import numpy as np
 
-from remdetect.modeling.evaluate import _predictions_are_causal
+from remdetect.modeling.causality import _predictions_are_causal
 
 
 class PerEpochModel:

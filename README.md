@@ -30,12 +30,11 @@ remdetect/                 importable library
 ├── dataset.py             load the Walch recordings (parsed once, cached)
 ├── features.py            the fixed causal feature set
 ├── splits.py              build the feature matrix and the LOSO splitter
-├── plots.py               confusion matrix and per-fold figure
 └── modeling/
     ├── model.py           XGBoost with a motor-atonia prior
     ├── tune.py            nested-CV engine and search spaces
     ├── compare.py         combine per-model reports, paired test
-    ├── evaluate.py        leave-one-subject-out scoring and the causality guard
+    ├── causality.py       the real-time causality guard
     ├── train.py           fit on the full set, serialize to models/
     └── predict.py         load the trained model and predict
 
@@ -70,7 +69,6 @@ work interactively.
 ## Deploy a model
 
 ```bash
-make evaluate         # LOSO breakdown for the deployment model
 make train            # fit on all data, write models/rem_xgb.json + model_meta.json
 make predict          # reload and predict
 ```
@@ -79,7 +77,8 @@ make predict          # reload and predict
 
 The comparison takes any scikit-learn estimator and a search space. Define both in a
 training notebook (see `2.1-mm-xgboost`) and call `nested_loso_f1`. Predictions must
-stay causal: `evaluate.py` checks every fold and raises if a model reads ahead.
+stay causal: the guard in `causality.py` checks every fold and raises if a model
+reads ahead.
 
 ## Add a feature
 

@@ -14,11 +14,9 @@ DATA_DIR = PROJ_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"            # original, immutable recordings
 INTERIM_DIR = DATA_DIR / "interim"   # transformed intermediates (parse caches)
 PROCESSED_DIR = DATA_DIR / "processed"   # final modeling datasets
-EXTERNAL_DIR = DATA_DIR / "external"     # third-party data
 
 MODELS_DIR = PROJ_ROOT / "models"    # serialized trained models
 REPORTS_DIR = PROJ_ROOT / "reports"  # generated metrics
-FIGURES_DIR = REPORTS_DIR / "figures"    # generated figures
 
 # Walch et al. (2019) recordings and their per-subject parse cache.
 WALCH_DIR = RAW_DIR / "walch2019"
