@@ -20,6 +20,10 @@ def test_nested_loso_f1_runs_and_aligns():
     estimator, param_space = logreg_search()
     out = nested_loso_f1(estimator, param_space, X, y, groups, n_iter=2, inner_splits=2)
 
+    n = out["f1"].size
     assert out["f1"].ndim == 1
-    assert len(out["subjects"]) == out["f1"].size == len(out["chosen_params"])
-    assert (out["f1"] >= 0).all() and (out["f1"] <= 1).all()
+    assert len(out["subjects"]) == n == len(out["chosen_params"])
+    for metric in ("f1", "precision", "recall"):
+        assert out[metric].size == n
+        assert (out[metric] >= 0).all() and (out[metric] <= 1).all()
+    assert out["confusion"].shape == (2, 2)              # [[TN, FP], [FN, TP]]

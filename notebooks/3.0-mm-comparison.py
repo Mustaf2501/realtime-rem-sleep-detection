@@ -42,7 +42,14 @@ def _(load_report):
 @app.cell
 def _(models, pd):
     summary = pd.DataFrame([
-        {"model": m["model"], "REM F1": m["mean"], "95% CI ±": m["ci95"], "subjects": m["n"]}
+        {
+            "model": m["model"],
+            "REM F1": m["mean"],
+            "precision": m["precision"]["mean"],
+            "recall": m["recall"]["mean"],
+            "95% CI ± (F1)": m["ci95"],
+            "subjects": m["n"],
+        }
         for m in models.values()
     ]).round(4)
     summary
@@ -75,6 +82,30 @@ def _(models, plt):
     _ax.set_title("REM F1 with 95% CI")
     for _i, _m in enumerate(_means):
         _ax.text(_i, _m + 0.01, f"{_m:.3f}", ha="center", fontsize=9)
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell
+def _(models, np, plt):
+    # Pooled confusion matrices (row-normalized), one per model.
+    _names = list(models)
+    _fig, _axes = plt.subplots(1, len(_names), figsize=(4 * len(_names), 3.4))
+    _axes = np.atleast_1d(_axes)
+    for _ax, _n in zip(_axes, _names):
+        _cm = np.array(models[_n]["confusion"], dtype=float)
+        _norm = _cm / _cm.sum(axis=1, keepdims=True)
+        _ax.imshow(_norm, cmap="Blues", vmin=0, vmax=1)
+        for _i in range(2):
+            for _j in range(2):
+                _ax.text(_j, _i, f"{int(_cm[_i, _j])}\n{_norm[_i, _j]:.2f}",
+                         ha="center", va="center", fontsize=9)
+        _ax.set_xticks([0, 1], models[_n]["confusion_labels"])
+        _ax.set_yticks([0, 1], models[_n]["confusion_labels"])
+        _ax.set_xlabel("predicted")
+        _ax.set_ylabel("true")
+        _ax.set_title(_n)
     _fig.tight_layout()
     _fig
     return

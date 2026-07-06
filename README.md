@@ -12,15 +12,17 @@ command line.
 
 ## Results
 
-Nested leave-one-subject-out cross-validation, scored by per-subject REM F1:
+Nested leave-one-subject-out cross-validation, per-subject means over 30 subjects:
 
-| model | REM F1 (95% CI) |
-|-------|-----------------|
-| logistic regression | 0.51 ± 0.05 |
-| XGBoost | 0.59 ± 0.05 |
+| model | REM F1 | precision | recall |
+|-------|--------|-----------|--------|
+| logistic regression | 0.51 | 0.42 | 0.70 |
+| XGBoost | 0.59 | 0.52 | 0.73 |
 
-XGBoost wins the paired Wilcoxon signed-rank test (p < 0.001). Regenerate the numbers
-with `make compare`.
+XGBoost wins the paired Wilcoxon signed-rank test on F1 (p < 0.001), and it beats
+logistic on both precision and recall. Each model's 95% CIs and pooled confusion
+matrix are saved in `reports/` and shown in the `3.0-mm-comparison` notebook.
+Regenerate with `make compare`.
 
 ## Layout
 
