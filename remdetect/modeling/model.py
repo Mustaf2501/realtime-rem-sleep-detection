@@ -14,7 +14,7 @@ in chronological order.
 Real-time constraint. The detector runs live on a watch, so the prediction for the
 epoch ending at t may use only data up to t. That rules out reading later epochs,
 post-hoc smoothing, whole-sequence normalization, and tuning on the held-out
-subject. evaluate.py checks this each fold and scores 0 on a violation; the features
+subject. The causality guard (causality.py) checks this on each fold; the features
 are already causal and the threshold is set at train time.
 
 build_xgb is the deployment model: XGBoost with a motor-atonia monotone prior (the

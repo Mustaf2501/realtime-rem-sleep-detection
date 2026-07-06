@@ -155,7 +155,7 @@ def _(mo):
 
 @app.cell
 def _(build_model, np, records, splits):
-    from remdetect.modeling.evaluate import _predictions_are_causal
+    from remdetect.modeling.causality import _predictions_are_causal
 
     X, y, groups = splits.make_dataset(records)     # fixed causal features for every epoch
     train_idx, test_idx = next(splits.cross_validator().split(X, y, groups=groups))

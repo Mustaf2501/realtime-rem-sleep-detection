@@ -28,7 +28,7 @@ from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, RandomizedSear
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from remdetect.modeling.evaluate import CausalityError, _predictions_are_causal
+from remdetect.modeling.causality import CausalityError, _predictions_are_causal
 from remdetect.modeling.model import AtoniaXGB, monotone_constraints
 
 SEED = 42

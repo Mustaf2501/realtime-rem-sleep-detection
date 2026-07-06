@@ -1,9 +1,9 @@
 """Train the REM model on the full feature set and serialize it to models/.
 
-Fits build_model() on every labeled epoch — no held-out subject, since this is the
-deployment model, not an evaluation (use evaluate.py for leave-one-subject-out
-scoring). Writes the trained XGBoost booster and the metadata needed to reproduce a
-prediction: the feature order and the decision threshold.
+Fits build_model() on every labeled epoch, with no held-out subject, since this is
+the deployment model rather than an evaluation (use `make compare` for
+leave-one-subject-out scoring). Writes the trained XGBoost booster and the metadata
+needed to reproduce a prediction: the feature order and the decision threshold.
 """
 from __future__ import annotations
 

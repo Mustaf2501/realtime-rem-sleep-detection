@@ -16,9 +16,6 @@ features:  ## Build data/processed/featurematrix.npz from the raw recordings
 train:  ## Fit the model on the full feature set, serialize to models/
 	uv run python -m remdetect.modeling.train
 
-evaluate:  ## Leave-one-subject-out scoring; writes reports/ + reports/figures/
-	uv run python -m remdetect.modeling.evaluate
-
 train-logreg:  ## Nested-CV train the logistic model headless; writes reports/logreg_nested.json
 	uv run python -m remdetect.modeling.tune logreg
 
