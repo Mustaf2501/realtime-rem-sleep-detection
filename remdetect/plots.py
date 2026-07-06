@@ -1,23 +1,23 @@
 """Recording one model's leave-one-subject-out results to disk.
 
-evaluate.py computes the numbers; this module records them. Given the scored stats,
-it writes results/<model-hash>.{py,json,png} -- the exact model, the metrics, and
-the figure -- keeping file IO, JSON, hashing, and matplotlib out of the scoring code.
+evaluate.py computes the numbers; this module records them. Given a model name and
+its scored stats, it writes reports/<name>.json (the metrics) and
+reports/figures/<name>.png (the confusion matrix + per-fold bars), keeping file IO,
+JSON, and matplotlib out of the scoring code.
 
 Public surface:
     row_normalized_confusion(y_true, y_pred, stages) -> (k, k) array
-    save(stats, confusion, per_class, n_subjects, labels, beta) -> writes the files
+    save(name, stats, confusion, per_class, n_subjects, labels, beta) -> writes the files
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 
 import numpy as np
 from sklearn.metrics import confusion_matrix
 
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+from remdetect.config import FIGURES_DIR, REPORTS_DIR
 
 
 def row_normalized_confusion(y_true: np.ndarray, y_pred: np.ndarray,
@@ -29,21 +29,16 @@ def row_normalized_confusion(y_true: np.ndarray, y_pred: np.ndarray,
     return np.divide(cm, row_totals, out=np.full_like(cm, np.nan), where=row_totals > 0)
 
 
-def save(stats: dict, confusion: np.ndarray, per_class: dict, n_subjects: int,
-         labels: list[str], beta: float) -> None:
-    """Write results/<model-hash>.{py,json,png} — the model, the numbers, the figure.
-    The hash keys on module.py, so identical models overwrite the same files."""
-    import module
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    model_hash = _model_hash()
-    base = os.path.join(RESULTS_DIR, model_hash)
+def save(name: str, stats: dict, confusion: np.ndarray, per_class: dict,
+         n_subjects: int, labels: list[str], beta: float) -> None:
+    """Write reports/<name>.json (metrics) and reports/figures/<name>.png (figure).
+    Named by the model, so re-running the same model overwrites its own files."""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    os.makedirs(FIGURES_DIR, exist_ok=True)
 
-    with open(base + ".py", "w") as f:          # the exact model — makes the hash identifiable
-        f.write(open(module.__file__).read())
-
-    with open(base + ".json", "w") as f:
+    with open(os.path.join(REPORTS_DIR, name + ".json"), "w") as f:
         json.dump({
-            "model_hash": model_hash,
+            "model": name,
             "metric_mean_rem_fbeta": stats["fbeta"][0],
             "beta": beta,
             "n_subjects": n_subjects,
@@ -61,16 +56,12 @@ def save(stats: dict, confusion: np.ndarray, per_class: dict, n_subjects: int,
             "confusion_method": "pooled, row-normalized over all epochs",
         }, f, indent=2)
 
-    _save_figure(base + ".png", stats, confusion, labels, beta, model_hash)
-
-
-def _model_hash() -> str:
-    import module
-    return hashlib.sha256(open(module.__file__, "rb").read()).hexdigest()[:12]
+    _save_figure(os.path.join(FIGURES_DIR, name + ".png"), stats, confusion,
+                 labels, beta, name)
 
 
 def _save_figure(path: str, stats: dict, confusion: np.ndarray,
-                 labels: list[str], beta: float, model_hash: str) -> None:
+                 labels: list[str], beta: float, name: str) -> None:
     import matplotlib
     matplotlib.use("Agg")   # headless: no display needed
     import matplotlib.pyplot as plt
@@ -98,7 +89,7 @@ def _save_figure(path: str, stats: dict, confusion: np.ndarray,
     ax_bar.set_ylabel("Ratio")
     ax_bar.set_title("Per-fold mean +/- SEM")
 
-    fig.suptitle(f"REM detection - model {model_hash}  (REM F{beta} = {stats['fbeta'][0]:.3f})")
+    fig.suptitle(f"REM detection - {name}  (REM F{beta} = {stats['fbeta'][0]:.3f})")
     fig.tight_layout()
     fig.savefig(path, dpi=120, bbox_inches="tight")
     plt.close(fig)

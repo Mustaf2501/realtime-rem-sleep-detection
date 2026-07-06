@@ -12,16 +12,10 @@ They cover:
   - the cross-validator is true leave-one-subject-out: one fold per subject,
     train/test never share a subject, every epoch is tested exactly once
 """
-import os
-import sys
-
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import features
-import splits
-from dataset import EPOCH_SEC, N2, N3, REM, WAKE, Record
+from remdetect import features, splits
+from remdetect.dataset import EPOCH_SEC, N2, N3, REM, WAKE, Record
 
 UNSCORED = -1
 
@@ -86,7 +80,7 @@ def test_load_dataset_uses_saved_matrix_without_raw_data(tmp_path, monkeypatch):
     splits._save(X, y, groups, splits._features_hash())
 
     # If load_dataset touched the raw recordings, this would fire — it must not.
-    import dataset
+    from remdetect import dataset
     def _boom():
         raise AssertionError("load_dataset read raw data instead of the saved matrix")
     monkeypatch.setattr(dataset, "load_records", _boom)

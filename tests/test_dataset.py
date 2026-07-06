@@ -5,14 +5,9 @@ The loader never re-sorts, so these check the data actually holds that order.
 
     uv run --extra test python -m pytest tests/test_dataset.py -v
 """
-import os
-import sys
-
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from dataset import EPOCH_SEC, load_records
+from remdetect.dataset import EPOCH_SEC, load_records
 
 
 def test_each_night_is_in_chronological_order():

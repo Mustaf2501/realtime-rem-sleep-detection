@@ -5,14 +5,9 @@ row and fail one that reads a later epoch to decide the current one.
 
     uv run --extra test python -m pytest tests/test_causality_guard.py -v
 """
-import os
-import sys
-
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from evaluate import _predictions_are_causal
+from remdetect.modeling.evaluate import _predictions_are_causal
 
 
 class PerEpochModel:

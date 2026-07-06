@@ -5,14 +5,9 @@ tabular fit(X, y) should keep working untouched.
 
     uv run --extra test python -m pytest tests/test_fit_contract.py -v
 """
-import os
-import sys
-
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from evaluate import _fit
+from remdetect.modeling.evaluate import _fit
 
 
 class GroupsAwareModel:

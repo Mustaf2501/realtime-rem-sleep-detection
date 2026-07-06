@@ -8,19 +8,16 @@ including these columns. Here we check the helper against a brute-force referenc
     uv run --extra test python -m pytest tests/test_temporal_features.py -v
 """
 import math
-import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from features import (FEATURE_NAMES, ROLL_WIN_LONG, ROLL_WIN_SHORT, _rolling_std,
-                      featurize)
-from test_features import make_record
+from conftest import make_record
+from remdetect.features import (FEATURE_NAMES, ROLL_WIN_LONG, ROLL_WIN_SHORT,
+                                _rolling_std, featurize)
 
 
-EXPECTED_NAMES = ["hr_mean", "hr_std_w10", "hr_std_w30", "activity", "act_std_w30", "time_h"]
+EXPECTED_NAMES = ["hr_mean", "hr_rel", "hr_std_w10", "hr_std_w30", "hr_raw_std",
+                  "hr_entropy", "activity", "act_std_w30", "time_h"]
 
 
 # --------------------------------------------------------------------------- #

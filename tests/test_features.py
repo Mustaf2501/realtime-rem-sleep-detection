@@ -12,44 +12,65 @@ They cover:
   - the activity count for epoch i comes from the time block [30(i-1), 30i)
   - features are causal: the first k epochs don't change when the rest is removed
 """
-import os
-import sys
-
 import numpy as np
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from dataset import EPOCH_SEC, Record, load_records
-from features import (ACT_EMA_ALPHA, _activity_counts, _causal_fill,
-                      _ema, _epoch_hr_mean, featurize)
+from conftest import make_record
+from remdetect.dataset import EPOCH_SEC, Record, load_records
+from remdetect.features import (ACT_EMA_ALPHA, FEATURE_NAMES, HR_BASELINE_ALPHA,
+                                HRV_WINDOW_SEC, _activity_counts, _causal_fill,
+                                _ema, _epoch_hr_mean, _windowed_hr_std, featurize)
 
 NAN = np.nan
 
 
 # --------------------------------------------------------------------------- #
+# relative HR and raw-series HRV (the added features)
+# --------------------------------------------------------------------------- #
+def test_hr_rel_is_hr_mean_minus_ema_baseline():
+    r = make_record(n_epochs=20, hr_bpm=60.0)
+    hr_mean = _epoch_hr_mean(r)
+    expected = hr_mean - _ema(hr_mean, HR_BASELINE_ALPHA)
+    got = featurize(r)[:, FEATURE_NAMES.index("hr_rel")]
+    assert np.allclose(got, expected)
+
+
+def test_windowed_hr_std_matches_trailing_window():
+    # 5 epochs ending at 0,30,60,90,120 s; a raw HR reading every 5 s with varied values.
+    epochs = np.arange(5) * EPOCH_SEC
+    ht = np.arange(0.0, 121.0, 5.0)
+    rng = np.random.default_rng(0)
+    hr = 60.0 + rng.normal(0.0, 5.0, size=ht.size)
+    r = Record("v", epochs, np.full(5, 2), ht, hr, np.zeros(1), np.zeros((1, 3)))
+
+    got = _windowed_hr_std(r, HRV_WINDOW_SEC)
+    for t, tau in enumerate(epochs):
+        window = hr[(ht > tau - HRV_WINDOW_SEC) & (ht <= tau)]   # causal trailing window
+        if window.size >= 2:
+            assert np.isclose(got[t], window.std())             # population std, matches
+
+
+def test_windowed_hr_std_is_causal():
+    # Earlier epochs' HRV must not change when later epochs (and their HR) are dropped.
+    r = make_record(n_epochs=20, hr_bpm=60.0)
+    full = _windowed_hr_std(r, HRV_WINDOW_SEC)
+    k = 8
+    trunc = _windowed_hr_std(truncate(r, k), HRV_WINDOW_SEC)
+    assert np.allclose(full[:k], trunc[:k])
+
+
+def test_sample_entropy_zero_on_flat_and_higher_when_irregular():
+    from remdetect.features import _sample_entropy
+    assert _sample_entropy(np.full(30, 60.0)) == 0.0     # flat -> perfectly predictable
+    rng = np.random.default_rng(0)
+    smooth = np.cumsum(rng.normal(0, 0.3, 40))           # correlated random walk
+    jerky = rng.normal(60, 5, 40)                        # independent noise
+    assert _sample_entropy(jerky) > _sample_entropy(smooth)
+
+
+# --------------------------------------------------------------------------- #
 # helpers to build controlled synthetic recordings
 # --------------------------------------------------------------------------- #
-def make_record(n_epochs=20, hr_bpm=60.0, burst_epoch=None) -> Record:
-    """A flat, still night (constant HR, no motion). If burst_epoch is given, a
-    1 Hz movement is injected into that epoch's 30 s block [30(e-1), 30e)."""
-    epoch_time = np.arange(n_epochs) * EPOCH_SEC
-    stage = np.full(n_epochs, 2)                       # all N2 (scored)
-
-    hr_time = np.arange(0.0, n_epochs * EPOCH_SEC, 5.0)
-    hr = np.full(hr_time.shape, hr_bpm)
-
-    motion_time = np.arange(0.0, n_epochs * EPOCH_SEC, 1.0 / 30)
-    motion = np.zeros((motion_time.size, 3))
-    motion[:, 2] = 1.0                                 # gravity on z, no movement
-    if burst_epoch is not None:
-        lo, hi = EPOCH_SEC * (burst_epoch - 1), EPOCH_SEC * burst_epoch
-        in_block = (motion_time >= lo) & (motion_time < hi)
-        motion[in_block, 0] += 0.3 * np.sin(2 * np.pi * 1.0 * motion_time[in_block])
-
-    return Record("synthetic", epoch_time, stage, hr_time, hr, motion_time, motion)
-
-
 def truncate(r: Record, k: int) -> Record:
     """The same record observed only through the end of epoch k-1."""
     t_end = r.epoch_time[k - 1]
@@ -62,7 +83,7 @@ def truncate(r: Record, k: int) -> Record:
 # shape / sanity
 # --------------------------------------------------------------------------- #
 def test_featurize_shape_one_row_per_epoch():
-    from features import FEATURE_NAMES
+    from remdetect.features import FEATURE_NAMES
     r = make_record(n_epochs=20)
     X = featurize(r)
     assert X.shape == (20, len(FEATURE_NAMES))   # one row per epoch, one col per named feature
@@ -75,7 +96,7 @@ def test_featurize_has_no_nans():
 
 def test_real_data_shape_and_finite():
     """Sanity check on a real subject-night from the dataset."""
-    from features import FEATURE_NAMES
+    from remdetect.features import FEATURE_NAMES
     r = load_records()[0]
     X = featurize(r)
     assert X.shape == (r.epoch_time.size, len(FEATURE_NAMES))
@@ -86,7 +107,7 @@ def test_real_data_shape_and_finite():
 # time-of-night feature (column 2)
 # --------------------------------------------------------------------------- #
 def test_time_of_night_is_epoch_time_in_hours():
-    from features import FEATURE_NAMES
+    from remdetect.features import FEATURE_NAMES
     r = make_record(n_epochs=20)
     X = featurize(r)
     assert np.allclose(X[:, FEATURE_NAMES.index("time_h")], r.epoch_time / 3600.0)
@@ -121,7 +142,7 @@ def test_ema_matches_hand_computation():
 
 def test_constant_hr_gives_constant_hr_feature():
     # HR steady at 60 bpm -> hr_mean is just the raw per-epoch mean = 60
-    from features import FEATURE_NAMES
+    from remdetect.features import FEATURE_NAMES
     X = featurize(make_record(n_epochs=20, hr_bpm=60.0))
     assert np.allclose(X[:, FEATURE_NAMES.index("hr_mean")], 60.0)
 
@@ -145,7 +166,7 @@ def test_activity_count_localizes_to_its_epoch_block():
 
 def test_featurize_activity_column_is_smoothed_squared_counts():
     # paper: the summed count magnitude is squared, then EMA-smoothed
-    from features import FEATURE_NAMES
+    from remdetect.features import FEATURE_NAMES
     r = make_record(n_epochs=20, burst_epoch=6)
     X = featurize(r)
     assert np.allclose(X[:, FEATURE_NAMES.index("activity")],
