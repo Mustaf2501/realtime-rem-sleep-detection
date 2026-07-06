@@ -1,81 +1,108 @@
 # Real-time wearable REM detection
 
-Detect REM sleep in real time from a wearable — heart rate, motion, and
-time-of-night — and optimize the detector with [Weco](https://www.weco.ai/). The
-data is the Walch et al. (2019) Apple Watch dataset (REM vs. not-REM), following
-Mallela & Mallett (2024).
+Detect REM sleep from a wrist wearable's heart rate, motion, and time of night, one
+30-second epoch at a time. The data is the Walch et al. (2019) Apple Watch recordings
+(31 subjects, one night each); the task is REM versus not-REM. Every model is scored
+by leave-one-subject-out cross-validation and must be causal: it may use only data up
+to the current epoch, so it can run live on the watch.
 
-Weco rewrites `module.py` to raise a precision-weighted REM score (F-beta with
-beta=0.3, which favors precision over recall to cut false REM cues) under
-leave-one-subject-out cross-validation. Each candidate stays causal, so it can run
-live on the watch rather than reading the whole night after the fact.
+Feature extraction is fixed and lives in the `remdetect` package, so every model
+trains on the same matrix. Models are compared both in marimo notebooks and from the
+command line.
+
+## Results
+
+Nested leave-one-subject-out cross-validation, scored by per-subject REM F1:
+
+| model | REM F1 (95% CI) |
+|-------|-----------------|
+| logistic regression | 0.51 ± 0.05 |
+| XGBoost | 0.59 ± 0.05 |
+
+XGBoost wins the paired Wilcoxon signed-rank test (p < 0.001). Regenerate the numbers
+with `make compare`.
 
 ## Layout
 
-| File | Role | Weco edits? |
-|------|------|-------------|
-| `module.py`   | the model: XGBoost with a motor-atonia prior + tuned REM threshold | yes |
-| `features.py` | feature extraction (HR + HR variability, activity + motion variability, time) | no |
-| `splits.py`   | builds the feature matrix and the LOSO splitter | no |
-| `evaluate.py` | scores via LOSO, prints `metric: N` | no |
-| `results.py`  | writes per-model metrics, confusion, and figure to `results/` | no |
-| `dataset.py`  | loads the Walch recordings from `data/walch2019/` (parsed once, cached) | no |
-| `data/`       | committed feature matrix; raw Walch recordings in `data/walch2019/` (see `data/README.md`) | no |
-| `results/`    | per-model confusion matrix and metrics | no |
+```
+remdetect/                 importable library
+├── config.py              paths
+├── dataset.py             load the Walch recordings (parsed once, cached)
+├── features.py            the fixed causal feature set
+├── splits.py              build the feature matrix and the LOSO splitter
+├── plots.py               confusion matrix and per-fold figure
+└── modeling/
+    ├── model.py           XGBoost with a motor-atonia prior
+    ├── tune.py            nested-CV engine and search spaces
+    ├── compare.py         combine per-model reports, paired test
+    ├── evaluate.py        leave-one-subject-out scoring and the causality guard
+    ├── train.py           fit on the full set, serialize to models/
+    └── predict.py         load the trained model and predict
 
-`module.py` must provide `build_model()`, returning an estimator with `fit(X, y)`
-and `predict(X)` (1 for REM) that applies the REM threshold in `predict`. The
-features are in `features.py` and Weco does not change them; it optimizes only the
-model. `evaluate.py` checks each fold for look-ahead and scores 0 if a model's
-earlier predictions change when later epochs are removed.
-
-### Design
-
-The modules keep simple interfaces over the detail: `dataset` handles file parsing
-and caching, `features` the feature extraction, `module` the model, and `splits`
-the dataset and folds. Splitting and scoring use `sklearn.model_selection` and
-`sklearn.metrics` rather than hand-written code.
-
-### Models Weco can try
-
-Any scikit-learn-compatible classifier over the feature matrix: random forest,
-gradient boosting (XGBoost or LightGBM), SVM, an MLP, or a torch/keras model
-wrapped as an estimator. A model that needs temporal context can declare
-`fit(X, y, groups)` and process each night causally. The environment already
-includes scikit-learn, PyTorch, XGBoost, LightGBM, and TensorFlow/Keras. Deep
-models over the raw signals are out of scope while features are fixed; edit
-`features.py` to change that.
+notebooks/                 EDA, per-model training, and the comparison (marimo)
+data/{raw,interim,processed}   recordings / parse cache / committed featurematrix.npz
+models/                    serialized models
+reports/                   metrics and figures
+```
 
 ## Setup
 
-Dependencies are managed with [uv](https://docs.astral.sh/uv/):
+Dependencies and the `remdetect` package (editable) are managed with
+[uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv sync
+make sync
 ```
 
-The repo ships `data/featurematrix.npz`, so the search runs without the raw
-recordings. To rebuild the features from scratch, install the dataset (see
-`data/README.md`) and run `evaluate.py`; a change to `features.py` triggers a
-rebuild.
-
-## Baseline
+## Compare models
 
 ```bash
-uv run python evaluate.py
+make train-logreg     # nested CV, writes reports/logreg_nested.json
+make train-xgboost    # nested CV, writes reports/xgboost_nested.json
+make compare          # paired test, writes reports/comparison_nested.json
 ```
 
-Prints the metric and the per-subject accuracy, precision, recall, and F-beta, and
-writes `results/<model-hash>.{py,json,png}`.
+Each `train-*` target runs nested leave-one-subject-out cross-validation: an outer
+LOSO loop for the held-out score, an inner grouped loop to tune hyperparameters. The
+notebooks `2.0-mm-logreg`, `2.1-mm-xgboost`, and `3.0-mm-comparison` do the same
+work interactively.
 
-## Run Weco
+## Deploy a model
 
 ```bash
-weco run \
-  --source module.py \
-  --eval-command "uv run python evaluate.py" \
-  --metric metric \
-  --goal maximize \
-  --steps 20 \
-  --save-logs
+make evaluate         # LOSO breakdown for the deployment model
+make train            # fit on all data, write models/rem_xgb.json + model_meta.json
+make predict          # reload and predict
+```
+
+## Add a model
+
+The comparison takes any scikit-learn estimator and a search space. Define both in a
+training notebook (see `2.1-mm-xgboost`) and call `nested_loso_f1`. Predictions must
+stay causal: `evaluate.py` checks every fold and raises if a model reads ahead.
+
+## Add a feature
+
+Edit `remdetect/features.py`. A feature must be causal, using only samples at or
+before the current epoch; the truncation tests in `tests/test_features.py` enforce
+this. Changing `features.py` rebuilds `data/processed/featurematrix.npz` on the next
+run.
+
+## Data
+
+The feature matrix ships with the repo, so you can train and compare without the raw
+recordings. To rebuild from the raw data, install the dataset (see `data/README.md`).
+
+## Test
+
+```bash
+make test
+```
+
+## Pairing with an agent (marimo pair)
+
+Open a notebook and an agent can join the running kernel to work alongside you:
+
+```bash
+make notebook         # uv run marimo edit notebooks/1.0-mm-eda.py --no-token
 ```

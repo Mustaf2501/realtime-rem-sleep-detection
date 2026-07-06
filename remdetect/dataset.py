@@ -25,19 +25,15 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from remdetect.config import CACHE_DIR, WALCH_DIR
+
 # Canonical stage codes used everywhere downstream.
 WAKE, N1, N2, N3, REM = 0, 1, 2, 3, 4
 EPOCH_SEC = 30.0
 _STAGE_MAP = {0: WAKE, 1: N1, 2: N2, 3: N3, 4: N3, 5: REM}  # missing -> -1 (unscored)
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-# The Walch (2019) raw recordings live in their own subfolder so other datasets can
-# sit alongside them (e.g. data/bidsleep). The committed feature matrix stays in
-# DATA_DIR; only the raw recordings and their parse cache are under WALCH_DIR.
-WALCH_DIR = os.path.join(DATA_DIR, "walch2019")
-# Raw text is parsed once and cached here as .npz; the raw files never change, so
-# later loads are near-instant. This keeps every Weco evaluation fast.
-CACHE_DIR = os.path.join(WALCH_DIR, ".cache")
+# Raw text is parsed once and cached as .npz under CACHE_DIR; the raw files never
+# change, so later loads are near-instant. Paths come from remdetect.config.
 
 
 @dataclass
@@ -45,7 +41,7 @@ class Record:
     """One subject-night of raw wearable streams + PSG hypnogram.
 
     All times are seconds from lights-off. Streams are causal: feature code in
-    module.py must only use samples with time <= the end of the current epoch.
+    features.py must only use samples with time <= the end of the current epoch.
 
     Nominal sampling rates (Walch et al., 2019): heart rate ~0.2 Hz (~1 sample
     per 5 s), triaxial acceleration ~30 Hz, hypnogram one stage per 30 s epoch
@@ -69,7 +65,6 @@ class Record:
 def load_records() -> list[Record]:
     """Every subject-night in ./data, keyed by the <id>_labeled_sleep.txt files."""
     paths = glob.glob(os.path.join(WALCH_DIR, "*_labeled_sleep.txt"))
-    print(paths)
     ids = sorted(os.path.basename(p).replace("_labeled_sleep.txt", "") for p in paths)
     if not ids:
         raise FileNotFoundError(

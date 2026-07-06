@@ -1,15 +1,25 @@
-# Recordings stay local — never commit raw data
-data/*
-!data/README.md
-# ...but the small prebuilt feature matrix IS committed, so a box can run the
-# search without the raw recordings:
-!data/featurematrix.npz
+# Raw recordings and parse caches stay local — large and regenerable, never commit.
+# The small prebuilt feature matrix (data/processed/featurematrix.npz) IS committed,
+# so a machine without the raw recordings can still train and evaluate.
+data/raw/
+data/interim/
+data/external/*
+!data/external/.gitkeep
 
-# Weco run logs (created by --save-logs)
-.runs/
+# Generated artifacts — regenerate with the Makefile targets (make train / evaluate).
+models/*
+!models/.gitkeep
+reports/*
+!reports/.gitkeep
+!reports/figures/
+reports/figures/*
+!reports/figures/.gitkeep
 
-# Per-model results (confusion matrix + metrics), written by evaluate.py
-results/
+# marimo notebook session cache (regenerated on run)
+__marimo__/
+
+# Flutter-port golden vectors — large, regenerable, kept local.
+export/
 
 # Python
 __pycache__/

@@ -8,10 +8,10 @@ each subject is held out once, so there is no seed.
 make_dataset builds (X, y, groups) together so the rows stay aligned; the features
 come from features.py.
 
-The feature matrix is saved to data/featurematrix.npz. It is the same on every
-Weco step (the features are fixed) and small enough to commit, so the search can
-run on another machine from the file alone, without the raw recordings. The file
-stores a hash of features.py; if features.py changes it is rebuilt from ./data.
+The feature matrix is saved to data/processed/featurematrix.npz. The features are
+fixed, so it is small enough to commit and lets another machine run from the file
+alone, without the raw recordings. The file stores a hash of features.py; if
+features.py changes it is rebuilt from the raw recordings.
 """
 from __future__ import annotations
 
@@ -21,10 +21,9 @@ import os
 import numpy as np
 from sklearn.model_selection import LeaveOneGroupOut
 
-import features
-from dataset import DATA_DIR, REM, Record
-
-DATASET_FILE = os.path.join(DATA_DIR, "featurematrix.npz")   # small; committed to git
+from remdetect import features
+from remdetect.config import DATASET_FILE, PROCESSED_DIR
+from remdetect.dataset import REM, Record
 
 
 def load_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -38,7 +37,7 @@ def load_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         print("[splits] features.py changed since data/featurematrix.npz was built; "
               "rebuilding from ./data (raw recordings required).")
 
-    from dataset import load_records          # only needed when (re)building
+    from remdetect.dataset import load_records   # only needed when (re)building
     X, y, groups = make_dataset(load_records())
     _save(X, y, groups, current)
     return X, y, groups
@@ -72,7 +71,7 @@ def _features_hash() -> str:
 
 
 def _save(X: np.ndarray, y: np.ndarray, groups: np.ndarray, features_hash: str) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
     tmp = f"{DATASET_FILE}.{os.getpid()}.tmp.npz"            # atomic write
     np.savez_compressed(tmp, X=X, y=y, groups=groups,
                         features_hash=np.array(features_hash))
