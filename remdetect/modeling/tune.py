@@ -14,16 +14,17 @@ outer-training data, and record the held-out subject's F1. The scaler lives insi
 each pipeline, so it is refit within every fold. predict scores each epoch from its
 own row, so the real-time constraint holds; we assert it per fold.
 
-nested_loso_f1 returns the per-subject F1 array (aligned across models by subject
-order) plus the hyperparameters chosen on each fold, so results are reproducible and
-comparable with a paired test.
+nested_loso_f1 returns per-subject F1, precision, and recall (aligned across models by
+subject order), a pooled confusion matrix, and the hyperparameters chosen on each
+fold, so results are reproducible and comparable with a paired test.
 """
 from __future__ import annotations
 
 import numpy as np
 from scipy.stats import loguniform, randint, uniform
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score
+from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
+                             recall_score)
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, RandomizedSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -70,19 +71,21 @@ SEARCHES = {"logreg": logreg_search, "xgboost": xgb_search}
 
 def nested_loso_f1(estimator, param_space, X, y, groups, *, n_iter=N_ITER,
                    inner_splits=INNER_SPLITS, seed=SEED) -> dict:
-    """Nested-LOSO REM F1 for a given estimator + hyperparameter space.
+    """Nested-LOSO scoring for a given estimator + hyperparameter space.
 
     The estimator and param_space are passed in (a notebook builds them in view), so
     this function is just the leakage-free protocol: outer LOSO, inner GroupKFold
-    hyperparameter search, causality check, per-subject F1. Subjects with no scored
-    REM are skipped (F1 undefined); the same subjects are skipped for every model, so
-    the returned arrays stay aligned by subject.
+    hyperparameter search, causality check, and per-subject REM F1 / precision / recall
+    plus a confusion matrix pooled over the held-out epochs. Subjects with no scored
+    REM are skipped (the REM metrics are undefined); the same subjects are skipped for
+    every model, so the returned arrays stay aligned by subject.
     """
     outer = LeaveOneGroupOut()
-    subjects, f1s, chosen = [], [], []
+    subjects, f1s, precisions, recalls, chosen = [], [], [], [], []
+    pooled_true, pooled_pred = [], []
     for train_idx, test_idx in outer.split(X, y, groups):
         subject = int(groups[test_idx][0])
-        if (y[test_idx] == REM_LABEL).sum() == 0:      # REM F1 undefined -> skip
+        if (y[test_idx] == REM_LABEL).sum() == 0:      # REM metrics undefined -> skip
             continue
         search = RandomizedSearchCV(
             estimator, param_space, n_iter=n_iter, scoring="f1",
@@ -90,15 +93,22 @@ def nested_loso_f1(estimator, param_space, X, y, groups, *, n_iter=N_ITER,
         search.fit(X[train_idx], y[train_idx], groups=groups[train_idx])
 
         best = search.best_estimator_
-        y_pred = best.predict(X[test_idx])
+        y_true, y_pred = y[test_idx], best.predict(X[test_idx])
         if not _predictions_are_causal(best, X[test_idx], y_pred):
             raise CausalityError(subject)
 
         subjects.append(subject)
-        f1s.append(f1_score(y[test_idx], y_pred, pos_label=REM_LABEL, zero_division=0))
+        f1s.append(f1_score(y_true, y_pred, pos_label=REM_LABEL, zero_division=0))
+        precisions.append(precision_score(y_true, y_pred, pos_label=REM_LABEL, zero_division=0))
+        recalls.append(recall_score(y_true, y_pred, pos_label=REM_LABEL, zero_division=0))
+        pooled_true.append(y_true)
+        pooled_pred.append(y_pred)
         chosen.append({k: _plain(v) for k, v in search.best_params_.items()})
 
-    return {"subjects": subjects, "f1": np.array(f1s), "chosen_params": chosen,
+    confusion = confusion_matrix(np.concatenate(pooled_true), np.concatenate(pooled_pred),
+                                 labels=[0, REM_LABEL])   # [[TN, FP], [FN, TP]]
+    return {"subjects": subjects, "f1": np.array(f1s), "precision": np.array(precisions),
+            "recall": np.array(recalls), "confusion": confusion, "chosen_params": chosen,
             "config": {"n_iter": n_iter, "inner_splits": inner_splits, "seed": seed}}
 
 
@@ -110,13 +120,21 @@ def summarize(f1: np.ndarray) -> dict:
 
 
 def to_report(name: str, res: dict) -> dict:
-    """Package a nested_loso_f1 result into a JSON-ready per-model report."""
+    """Package a nested_loso_f1 result into a JSON-ready per-model report. Top-level
+    mean/sem/ci95/n is the F1 summary; precision and recall are nested; confusion is
+    the pooled 2x2 count matrix with labels [not-REM, REM]."""
     return {
         "model": name,
         "metric": "REM F1 (per-subject, LOSO)",
         "config": res["config"],
         "subjects": res["subjects"],
         "per_subject_f1": res["f1"].tolist(),
+        "per_subject_precision": res["precision"].tolist(),
+        "per_subject_recall": res["recall"].tolist(),
+        "precision": summarize(res["precision"]),
+        "recall": summarize(res["recall"]),
+        "confusion": res["confusion"].tolist(),
+        "confusion_labels": ["not-REM", "REM"],
         "chosen_params": res["chosen_params"],
         **summarize(res["f1"]),
     }
