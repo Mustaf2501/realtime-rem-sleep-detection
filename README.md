@@ -23,12 +23,9 @@ XGBoost beats logistic regression on all three metrics. Each model's 95% CIs and
 pooled confusion matrix are saved in `reports/`, written by the training notebooks
 (`2.0-mm-logreg`, `2.1-mm-xgboost`) or `make train-logreg` / `make train-xgboost`.
 
-## Operating points
-
-The comparison above scores each model at the default 0.5 threshold. A second
-experiment keeps the F1-tuned XGBoost and re-tunes only its decision threshold to
-favor precision, using scikit-learn's `TunedThresholdClassifierCV`. The threshold is
-chosen on the training subjects, so nothing leaks from the held-out subject.
+## Tuning Decision Threshold 
+A second experiment keeps the F1-tuned XGBoost and re-tunes only its decision threshold to
+favor precision by varying beta. 
 
 | threshold tuned for | threshold | precision | recall |
 |---------------------|-----------|-----------|--------|
@@ -37,8 +34,7 @@ chosen on the training subjects, so nothing leaks from the held-out subject.
 | F0.3                | 0.82      | 0.70      | 0.35   |
 
 Raising the threshold trades recall for precision. Tuning for F0.3 reaches 0.70
-precision at 0.35 recall, a high-precision detector that flags fewer false REM
-epochs. Run it in the `2.2-mm-xgboost-fbeta` notebook; the reports save to
+precision at 0.35 recall. Run it in the `2.2-mm-xgboost-fbeta` notebook; the reports save to
 `reports/xgboost_f05_nested.json` and `reports/xgboost_f03_nested.json`.
 
 ## Layout
