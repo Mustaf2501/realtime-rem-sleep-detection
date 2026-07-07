@@ -6,16 +6,14 @@ app = marimo.App(width="medium")
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        r"""
-        # XGBoost
+    mo.md(r"""
+    # XGBoost
 
-        Nested leave-one-subject-out CV: outer LOSO for the held-out score, inner
-        GroupKFold(5) to tune the tree and regularization params (randomized search,
-        25 draws). The estimator and search space are defined below; `nested_loso_f1`
-        runs the protocol and writes `reports/xgboost_nested.json`.
-        """
-    )
+    Nested leave-one-subject-out CV: outer LOSO for the held-out score, inner
+    GroupKFold(5) to tune the tree and regularization params (randomized search,
+    25 draws). The estimator and search space are defined below; `nested_loso_f1`
+    runs the protocol and writes `reports/xgboost_nested.json`.
+    """)
     return
 
 
@@ -34,9 +32,23 @@ def _():
     from remdetect.modeling.model import AtoniaXGB, monotone_constraints
     from remdetect.modeling.tune import nested_loso_f1, to_report
 
-    return (AtoniaXGB, FEATURE_NAMES, clone, loguniform, mo, monotone_constraints,
-            nested_loso_f1, np, pd, plt, randint, save_report, splits, to_report,
-            uniform)
+    return (
+        AtoniaXGB,
+        FEATURE_NAMES,
+        clone,
+        loguniform,
+        mo,
+        monotone_constraints,
+        nested_loso_f1,
+        np,
+        pd,
+        plt,
+        randint,
+        save_report,
+        splits,
+        to_report,
+        uniform,
+    )
 
 
 @app.cell
@@ -77,7 +89,16 @@ def _(loguniform, randint, uniform):
 
 
 @app.cell
-def _(X, estimator, groups, nested_loso_f1, param_space, save_report, to_report, y):
+def _(
+    X,
+    estimator,
+    groups,
+    nested_loso_f1,
+    param_space,
+    save_report,
+    to_report,
+    y,
+):
     res = nested_loso_f1(estimator, param_space, X, y, groups, n_iter=25, inner_splits=5)
     report = to_report("xgboost", res)
     save_report(report)
@@ -87,18 +108,24 @@ def _(X, estimator, groups, nested_loso_f1, param_space, save_report, to_report,
 @app.cell
 def _(mo, report):
     mo.md(
-        f"REM F1 {report['mean']:.4f} ± {report['ci95']:.4f} (95% CI, n={report['n']}). "
-        f"Saved to `reports/xgboost_nested.json`."
+        "| metric | mean ± SEM |\n"
+        "|---|---|\n"
+        f"| REM F1 | {report['f1']['mean']:.3f} ± {report['f1']['sem']:.3f} |\n"
+        f"| precision | {report['precision']['mean']:.3f} ± {report['precision']['sem']:.3f} |\n"
+        f"| recall | {report['recall']['mean']:.3f} ± {report['recall']['sem']:.3f} |\n\n"
+        f"Per-subject means over n = {report['n_subjects']} subjects. "
+        "Saved to `reports/xgboost_nested.json`."
     )
     return
 
 
 @app.cell
 def _(np, plt, report):
-    _f1 = np.sort(np.array(report["per_subject_f1"]))
+    _f1 = np.sort(np.array(report["f1"]["per_subject"]))
+    _mean = report["f1"]["mean"]
     _fig, _ax = plt.subplots(figsize=(9, 3))
     _ax.bar(range(len(_f1)), _f1, color="0.6", edgecolor="black")
-    _ax.axhline(report["mean"], color="crimson", lw=1, label=f"mean {report['mean']:.3f}")
+    _ax.axhline(_mean, color="crimson", lw=1, label=f"mean {_mean:.3f}")
     _ax.set_xlabel("subject (sorted by F1)")
     _ax.set_ylabel("held-out REM F1")
     _ax.set_title("Per-subject generalization")
@@ -110,7 +137,9 @@ def _(np, plt, report):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""### Feature importances and hyperparameter stability""")
+    mo.md(r"""
+    ### Feature importances and hyperparameter stability
+    """)
     return
 
 
@@ -133,6 +162,36 @@ def _(pd, report):
     # Spread of the tuned config across the 30 outer folds.
     chosen = pd.DataFrame(report["chosen_params"])
     chosen.describe().loc[["mean", "std", "min", "max"]].round(3)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Export for deployment
+
+    Fit the XGBoost deployment model on every subject (no held-out split) and serialize it
+    for the Flutter/Dart app: the booster as native JSON plus a metadata sidecar holding the
+    feature order and the decision threshold.
+    """)
+    return
+
+
+@app.cell
+def _(X, mo, y):
+    from remdetect.modeling.model import build_model
+    from remdetect.modeling.train import save_model
+
+    _deploy = build_model().fit(X, y)          # fit on all subjects, no held-out split
+    _booster, _meta = save_model(_deploy)
+    mo.md(f"""
+    **Deployment model saved** (load these in Flutter/Dart):
+
+    - `{_booster}` — XGBoost booster, native JSON
+    - `{_meta}` — feature order and the decision threshold
+
+    Rule: predict REM when P(REM) >= {_deploy.threshold:.3f}.
+    """)
     return
 
 

@@ -1,39 +1,26 @@
-.PHONY: help sync data features train evaluate predict notebook test clean
+.PHONY: help sync train-logreg train-xgboost train predict notebooks test
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
 
 sync:  ## Install dependencies and the remdetect package (editable)
 	uv sync --extra test
 
-data:  ## Report the raw dataset (subjects, scored epochs, REM %)
-	uv run python -m remdetect.dataset
-
-features:  ## Build data/processed/featurematrix.npz from the raw recordings
-	uv run python -m remdetect.splits
-
-train:  ## Fit the model on the full feature set, serialize to models/
-	uv run python -m remdetect.modeling.train
-
-train-logreg:  ## Nested-CV train the logistic model headless; writes reports/logreg_nested.json
+train-logreg:  ## Nested-CV the logistic model; writes reports/logreg_nested.json
 	uv run python -m remdetect.modeling.tune logreg
 
-train-xgboost:  ## Nested-CV train XGBoost headless; writes reports/xgboost_nested.json
+train-xgboost:  ## Nested-CV XGBoost; writes reports/xgboost_nested.json
 	uv run python -m remdetect.modeling.tune xgboost
 
-compare:  ## Combine the two per-model reports + paired test; writes reports/comparison_nested.json
-	uv run python -m remdetect.modeling.compare
+train:  ## Fit the deployment model on all data, serialize to models/
+	uv run python -m remdetect.modeling.train
 
-predict:  ## Load the trained model from models/ and predict on the feature set
+predict:  ## Load the trained model from models/ and predict
 	uv run python -m remdetect.modeling.predict
 
-notebook:  ## Open the EDA notebook in marimo (pairing-ready: --no-token so an agent can discover it)
-	uv run marimo edit notebooks/1.0-mm-eda.py --no-token
+notebooks:  ## Open the marimo server on notebooks/ (browse and open all notebooks)
+	uv run marimo edit notebooks/ --no-token
 
 test:  ## Run the test suite
 	uv run --extra test python -m pytest
-
-clean:  ## Remove Python caches
-	find . -type d -name __pycache__ -not -path './.venv/*' -exec rm -rf {} +
-	rm -rf .pytest_cache

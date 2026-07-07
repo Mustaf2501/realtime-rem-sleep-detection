@@ -19,10 +19,27 @@ Nested leave-one-subject-out cross-validation, per-subject means over 30 subject
 | logistic regression | 0.51 | 0.42 | 0.70 |
 | XGBoost | 0.59 | 0.52 | 0.73 |
 
-XGBoost wins the paired Wilcoxon signed-rank test on F1 (p < 0.001), and it beats
-logistic on both precision and recall. Each model's 95% CIs and pooled confusion
-matrix are saved in `reports/` and shown in the `3.0-mm-comparison` notebook.
-Regenerate with `make compare`.
+XGBoost beats logistic regression on all three metrics. Each model's 95% CIs and
+pooled confusion matrix are saved in `reports/`, written by the training notebooks
+(`2.0-mm-logreg`, `2.1-mm-xgboost`) or `make train-logreg` / `make train-xgboost`.
+
+## Operating points
+
+The comparison above scores each model at the default 0.5 threshold. A second
+experiment keeps the F1-tuned XGBoost and re-tunes only its decision threshold to
+favor precision, using scikit-learn's `TunedThresholdClassifierCV`. The threshold is
+chosen on the training subjects, so nothing leaks from the held-out subject.
+
+| threshold tuned for | threshold | precision | recall |
+|---------------------|-----------|-----------|--------|
+| F1 (default)        | 0.50      | 0.52      | 0.73   |
+| F0.5                | 0.75      | 0.64      | 0.46   |
+| F0.3                | 0.82      | 0.70      | 0.35   |
+
+Raising the threshold trades recall for precision. Tuning for F0.3 reaches 0.70
+precision at 0.35 recall, a high-precision detector that flags fewer false REM
+epochs. Run it in the `2.2-mm-xgboost-fbeta` notebook; the reports save to
+`reports/xgboost_f05_nested.json` and `reports/xgboost_f03_nested.json`.
 
 ## Layout
 
@@ -34,13 +51,12 @@ remdetect/                 importable library
 ├── splits.py              build the feature matrix and the LOSO splitter
 └── modeling/
     ├── model.py           XGBoost with a motor-atonia prior
-    ├── tune.py            nested-CV engine and search spaces
-    ├── compare.py         combine per-model reports, paired test
+    ├── tune.py            nested-CV engine, search spaces, report writing
     ├── causality.py       the real-time causality guard
     ├── train.py           fit on the full set, serialize to models/
     └── predict.py         load the trained model and predict
 
-notebooks/                 EDA, per-model training, and the comparison (marimo)
+notebooks/                 EDA and per-model training (marimo)
 data/{raw,interim,processed}   recordings / parse cache / committed featurematrix.npz
 models/                    serialized models
 reports/                   metrics and figures
@@ -60,13 +76,12 @@ make sync
 ```bash
 make train-logreg     # nested CV, writes reports/logreg_nested.json
 make train-xgboost    # nested CV, writes reports/xgboost_nested.json
-make compare          # paired test, writes reports/comparison_nested.json
 ```
 
 Each `train-*` target runs nested leave-one-subject-out cross-validation: an outer
 LOSO loop for the held-out score, an inner grouped loop to tune hyperparameters. The
-notebooks `2.0-mm-logreg`, `2.1-mm-xgboost`, and `3.0-mm-comparison` do the same
-work interactively.
+notebooks `2.0-mm-logreg` and `2.1-mm-xgboost` do the same work interactively, and
+each report holds the per-subject scores for comparing the two.
 
 ## Deploy a model
 
@@ -105,5 +120,5 @@ make test
 Open a notebook and an agent can join the running kernel to work alongside you:
 
 ```bash
-make notebook         # uv run marimo edit notebooks/1.0-mm-eda.py --no-token
+make notebooks        # uv run marimo edit notebooks/ --no-token
 ```

@@ -16,19 +16,24 @@ own row, so the real-time constraint holds; we assert it per fold.
 
 nested_loso_f1 returns per-subject F1, precision, and recall (aligned across models by
 subject order), a pooled confusion matrix, and the hyperparameters chosen on each
-fold, so results are reproducible and comparable with a paired test.
+fold, so results are reproducible and comparable across models.
 """
 from __future__ import annotations
+
+import json
+import os
 
 import numpy as np
 from scipy.stats import loguniform, randint, uniform
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (confusion_matrix, f1_score, precision_score,
-                             recall_score)
-from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, RandomizedSearchCV
+from sklearn.metrics import (confusion_matrix, f1_score, fbeta_score, make_scorer,
+                             precision_score, recall_score)
+from sklearn.model_selection import (GroupKFold, LeaveOneGroupOut,
+                                     RandomizedSearchCV, TunedThresholdClassifierCV)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from remdetect.config import REPORTS_DIR
 from remdetect.modeling.causality import CausalityError, _predictions_are_causal
 from remdetect.modeling.model import AtoniaXGB, monotone_constraints
 
@@ -70,19 +75,26 @@ SEARCHES = {"logreg": logreg_search, "xgboost": xgb_search}
 
 
 def nested_loso_f1(estimator, param_space, X, y, groups, *, n_iter=N_ITER,
-                   inner_splits=INNER_SPLITS, seed=SEED) -> dict:
+                   inner_splits=INNER_SPLITS, seed=SEED, beta=None) -> dict:
     """Nested-LOSO scoring for a given estimator + hyperparameter space.
 
     The estimator and param_space are passed in (a notebook builds them in view), so
     this function is just the leakage-free protocol: outer LOSO, inner GroupKFold
-    hyperparameter search, causality check, and per-subject REM F1 / precision / recall
-    plus a confusion matrix pooled over the held-out epochs. Subjects with no scored
-    REM are skipped (the REM metrics are undefined); the same subjects are skipped for
-    every model, so the returned arrays stay aligned by subject.
+    hyperparameter search (scored by F1), causality check, and per-subject REM F1 /
+    precision / recall plus a confusion matrix pooled over the held-out epochs.
+    Subjects with no scored REM are skipped (the REM metrics are undefined); the same
+    subjects are skipped for every model, so the returned arrays stay aligned.
+
+    If beta is set, each fold's tuned estimator has its decision threshold chosen to
+    maximize F-beta on the training subjects (sklearn's TunedThresholdClassifierCV),
+    and the result gains per-subject F-beta and the mean chosen threshold. With
+    beta=None the estimator's own 0.5 cutoff is used.
     """
+    fbeta_scorer = (make_scorer(fbeta_score, beta=beta, pos_label=REM_LABEL,
+                                zero_division=0) if beta is not None else None)
     outer = LeaveOneGroupOut()
     subjects, f1s, precisions, recalls, chosen = [], [], [], [], []
-    pooled_true, pooled_pred = [], []
+    fbetas, thresholds, pooled_true, pooled_pred = [], [], [], []
     for train_idx, test_idx in outer.split(X, y, groups):
         subject = int(groups[test_idx][0])
         if (y[test_idx] == REM_LABEL).sum() == 0:      # REM metrics undefined -> skip
@@ -93,6 +105,11 @@ def nested_loso_f1(estimator, param_space, X, y, groups, *, n_iter=N_ITER,
         search.fit(X[train_idx], y[train_idx], groups=groups[train_idx])
 
         best = search.best_estimator_
+        if beta is not None:                            # tune the threshold for F-beta
+            best = TunedThresholdClassifierCV(best, scoring=fbeta_scorer, cv=inner_splits)
+            best.fit(X[train_idx], y[train_idx])
+            thresholds.append(float(best.best_threshold_))
+
         y_true, y_pred = y[test_idx], best.predict(X[test_idx])
         if not _predictions_are_causal(best, X[test_idx], y_pred):
             raise CausalityError(subject)
@@ -101,43 +118,65 @@ def nested_loso_f1(estimator, param_space, X, y, groups, *, n_iter=N_ITER,
         f1s.append(f1_score(y_true, y_pred, pos_label=REM_LABEL, zero_division=0))
         precisions.append(precision_score(y_true, y_pred, pos_label=REM_LABEL, zero_division=0))
         recalls.append(recall_score(y_true, y_pred, pos_label=REM_LABEL, zero_division=0))
+        if beta is not None:
+            fbetas.append(fbeta_score(y_true, y_pred, beta=beta, pos_label=REM_LABEL, zero_division=0))
         pooled_true.append(y_true)
         pooled_pred.append(y_pred)
         chosen.append({k: _plain(v) for k, v in search.best_params_.items()})
 
     confusion = confusion_matrix(np.concatenate(pooled_true), np.concatenate(pooled_pred),
                                  labels=[0, REM_LABEL])   # [[TN, FP], [FN, TP]]
-    return {"subjects": subjects, "f1": np.array(f1s), "precision": np.array(precisions),
-            "recall": np.array(recalls), "confusion": confusion, "chosen_params": chosen,
-            "config": {"n_iter": n_iter, "inner_splits": inner_splits, "seed": seed}}
+    res = {"subjects": subjects, "f1": np.array(f1s), "precision": np.array(precisions),
+           "recall": np.array(recalls), "confusion": confusion, "chosen_params": chosen,
+           "config": {"n_iter": n_iter, "inner_splits": inner_splits, "seed": seed, "beta": beta}}
+    if beta is not None:
+        res["fbeta"] = np.array(fbetas)
+        res["beta"] = beta
+        res["threshold_mean"] = float(np.mean(thresholds))
+    return res
 
 
-def summarize(f1: np.ndarray) -> dict:
-    """Per-subject F1 -> mean, SEM, and a normal-approx 95% CI half-width."""
-    mean = float(f1.mean())
-    sem = float(f1.std(ddof=1) / np.sqrt(f1.size)) if f1.size > 1 else 0.0
-    return {"mean": mean, "sem": sem, "ci95": 1.96 * sem, "n": int(f1.size)}
+def _metric_block(values: np.ndarray) -> dict:
+    """A per-subject metric summarized: mean, SEM, normal-approx 95% CI half-width,
+    and the per-subject values themselves."""
+    v = np.asarray(values, dtype=float)
+    sem = float(v.std(ddof=1) / np.sqrt(v.size)) if v.size > 1 else 0.0
+    return {"mean": float(v.mean()), "sem": sem, "ci95": 1.96 * sem,
+            "per_subject": v.tolist()}
 
 
 def to_report(name: str, res: dict) -> dict:
-    """Package a nested_loso_f1 result into a JSON-ready per-model report. Top-level
-    mean/sem/ci95/n is the F1 summary; precision and recall are nested; confusion is
-    the pooled 2x2 count matrix with labels [not-REM, REM]."""
-    return {
+    """Package a nested_loso_f1 result into a JSON-ready per-model report.
+
+    Each metric (f1, precision, recall) is its own self-describing block with mean,
+    SEM, 95% CI, and per-subject values; confusion is the pooled 2x2 count matrix with
+    its labels. All metrics share the same n_subjects.
+    """
+    report = {
         "model": name,
-        "metric": "REM F1 (per-subject, LOSO)",
+        "metric": "REM (per-subject, nested LOSO)",
         "config": res["config"],
+        "n_subjects": int(res["f1"].size),
         "subjects": res["subjects"],
-        "per_subject_f1": res["f1"].tolist(),
-        "per_subject_precision": res["precision"].tolist(),
-        "per_subject_recall": res["recall"].tolist(),
-        "precision": summarize(res["precision"]),
-        "recall": summarize(res["recall"]),
-        "confusion": res["confusion"].tolist(),
-        "confusion_labels": ["not-REM", "REM"],
+        "f1": _metric_block(res["f1"]),
+        "precision": _metric_block(res["precision"]),
+        "recall": _metric_block(res["recall"]),
+        "confusion": {"matrix": res["confusion"].tolist(), "labels": ["not-REM", "REM"]},
         "chosen_params": res["chosen_params"],
-        **summarize(res["f1"]),
     }
+    if "fbeta" in res:      # threshold tuned for this F-beta
+        report["fbeta"] = {**_metric_block(res["fbeta"]), "beta": res["beta"],
+                           "threshold_mean": res["threshold_mean"]}
+    return report
+
+
+def save_report(report: dict) -> str:
+    """Write one model's report to reports/<model>_nested.json."""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    path = os.path.join(REPORTS_DIR, f"{report['model']}_nested.json")
+    with open(path, "w") as f:
+        json.dump(report, f, indent=2)
+    return path
 
 
 def run_model(name: str, X, y, groups, *, n_iter=N_ITER,
@@ -160,11 +199,10 @@ if __name__ == "__main__":     # headless mirror of the training notebooks (for 
     import sys
 
     from remdetect import splits
-    from remdetect.modeling.compare import save_report
 
     model_name = sys.argv[1] if len(sys.argv) > 1 else "xgboost"
     X_all, y_all, groups_all = splits.load_dataset()
     report = run_model(model_name, X_all, y_all, groups_all)
-    print(f"{model_name}: REM F1 {report['mean']:.4f} +/- {report['ci95']:.4f} "
-          f"(95% CI, n={report['n']})")
+    print(f"{model_name}: REM F1 {report['f1']['mean']:.4f} +/- "
+          f"{report['f1']['ci95']:.4f} (95% CI, n={report['n_subjects']})")
     print("saved", save_report(report))

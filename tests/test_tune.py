@@ -7,7 +7,7 @@ so the test stays fast; the XGBoost path shares the same machinery.
 import numpy as np
 
 from remdetect.features import FEATURE_NAMES
-from remdetect.modeling.tune import logreg_search, nested_loso_f1
+from remdetect.modeling.tune import logreg_search, nested_loso_f1, to_report
 
 
 def test_nested_loso_f1_runs_and_aligns():
@@ -27,3 +27,27 @@ def test_nested_loso_f1_runs_and_aligns():
         assert out[metric].size == n
         assert (out[metric] >= 0).all() and (out[metric] <= 1).all()
     assert out["confusion"].shape == (2, 2)              # [[TN, FP], [FN, TP]]
+
+    report = to_report("logreg", out)                    # self-describing report schema
+    assert report["n_subjects"] == n
+    for metric in ("f1", "precision", "recall"):
+        assert set(report[metric]) == {"mean", "sem", "ci95", "per_subject"}
+        assert len(report[metric]["per_subject"]) == n
+    assert set(report["confusion"]) == {"matrix", "labels"}
+
+
+def test_nested_loso_tunes_threshold_for_fbeta():
+    rng = np.random.default_rng(0)
+    n_subjects, per = 5, 40
+    X = rng.normal(size=(n_subjects * per, len(FEATURE_NAMES)))
+    groups = np.repeat(np.arange(n_subjects), per)
+    y = (X[:, 0] + rng.normal(scale=0.5, size=n_subjects * per) > 0).astype(int)
+
+    estimator, param_space = logreg_search()
+    out = nested_loso_f1(estimator, param_space, X, y, groups,
+                         n_iter=2, inner_splits=2, beta=0.5)
+
+    assert out["fbeta"].size == out["f1"].size and out["beta"] == 0.5
+    report = to_report("logreg_f05", out)
+    assert set(report["fbeta"]) == {"mean", "sem", "ci95", "per_subject", "beta", "threshold_mean"}
+    assert 0.0 < report["fbeta"]["threshold_mean"] < 1.0
